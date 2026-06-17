@@ -14,7 +14,7 @@ from difflib import SequenceMatcher
 # ── Configuración de la página ────────────────────────────────────────────────
 st.set_page_config(
     page_title="Buscador Cotizaciones · ION Chile",
-    page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "ion_logo2.png"),
+    page_icon="⚡",
     layout="wide"
 )
 
@@ -58,33 +58,42 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Rutas de archivos ─────────────────────────────────────────────────────────
+# ── Logos en base64 ───────────────────────────────────────────────────────────
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH    = os.path.join(BASE_DIR, "ion_logo.png")
 LOGO_ISOTIPO = os.path.join(BASE_DIR, "ion_logo2.png")
 
-# ── Carga de datos ────────────────────────────────────────────────────────────
-SHEET_ID = "18jORpO5KViHxKG_vmsXXw-df7GMYOCjPLsXGPr4aVXg"
+logo_b64    = base64.b64encode(open(LOGO_PATH, "rb").read()).decode()
+isotipo_b64 = base64.b64encode(open(LOGO_ISOTIPO, "rb").read()).decode()
+
+# ── Carga de datos desde Google Sheets ───────────────────────────────────────
+SHEET_ID  = "18jORpO5KViHxKG_vmsXXw-df7GMYOCjPLsXGPr4aVXg"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-@st.cache_data(ttl=300)  # Refresca cada 5 minutos automáticamente
+@st.cache_data(ttl=300)
 def load():
-    df = pd.read_csv(SHEET_URL)
+    df = pd.read_csv(SHEET_URL, header=0)
+    # Elimina columnas sin nombre (columna A vacía del Sheet)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
-    df = df.drop(columns=["Unnamed: 0"], errors="ignore")
+    # Limpia strings
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].astype(str).str.strip().replace("nan", "")
+    # Limpia números: quita $, espacios y puntos de miles, convierte coma decimal a punto
     for col in ["Precio Unitario", "Precio Total USD", "Precio Total CLP", "Cantidad"]:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace(r'[\$,\.]', '', regex=True).str.replace(',', '.'), errors="coerce")
-    df["Fecha Cotización"] = pd.to_datetime(df["Fecha Cotización"], errors="coerce")
+            df[col] = (df[col].astype(str)
+                       .str.replace(r'[\$\s]', '', regex=True)
+                       .str.replace('.', '', regex=False)
+                       .str.replace(',', '.', regex=False))
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Fecha en formato DD-MM-YYYY
+    if "Fecha Cotización" in df.columns:
+        df["Fecha Cotización"] = pd.to_datetime(
+            df["Fecha Cotización"], dayfirst=True, errors="coerce")
     return df
 
 df = load()
-
-# ── Logos en base64 ───────────────────────────────────────────────────────────
-logo_b64    = base64.b64encode(open(LOGO_PATH, "rb").read()).decode()
-isotipo_b64 = base64.b64encode(open(LOGO_ISOTIPO, "rb").read()).decode()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
@@ -163,37 +172,25 @@ with st.sidebar:
     )
 
 # ── Búsqueda inteligente ──────────────────────────────────────────────────────
-# Busca de 3 formas:
-# 1. Coincidencia exacta (case insensitive)
-# 2. Todas las palabras del query aparecen en la fila (orden no importa)
-# 3. Similitud difusa para tolerar errores de tipeo (umbral 0.6)
 def busqueda_inteligente(df, query):
     if not query:
         return df
-
     query_norm = query.lower().strip()
     palabras   = query_norm.split()
 
     def fila_coincide(row):
         texto = " ".join(row.astype(str).values).lower()
-
-        # 1. Coincidencia exacta del query completo
         if query_norm in texto:
             return True
-
-        # 2. Todas las palabras aparecen en algún lugar de la fila
         if all(p in texto for p in palabras):
             return True
-
-        # 3. Similitud difusa palabra por palabra contra cada celda
         for celda in row.astype(str).values:
             celda_norm = celda.lower()
             for palabra in palabras:
-                if len(palabra) >= 4:  # Solo aplica fuzzy a palabras de 4+ letras
+                if len(palabra) >= 4:
                     sim = SequenceMatcher(None, palabra, celda_norm).ratio()
                     if sim >= 0.75:
                         return True
-                    # También busca la palabra dentro de la celda con fuzzy
                     for i in range(len(celda_norm) - len(palabra) + 1):
                         sub = celda_norm[i:i+len(palabra)]
                         if SequenceMatcher(None, palabra, sub).ratio() >= 0.8:
@@ -205,11 +202,8 @@ def busqueda_inteligente(df, query):
 
 # ── Aplicar filtros ───────────────────────────────────────────────────────────
 filtered = df.copy()
-
-# Búsqueda inteligente
 filtered = busqueda_inteligente(filtered, search)
 
-# Filtros por columna
 for col, val in [
     ("Cuenta Contable",   cuenta),
     ("Clasificación",     clas),
@@ -236,7 +230,6 @@ def convertir_a_clp(row, col, usd, uf):
         return val
 
 filtered = filtered.copy()
-
 filtered["P. Unit. CLP num"] = filtered.apply(
     lambda r: convertir_a_clp(r, "Precio Unitario", usd_clp, uf_clp), axis=1)
 
@@ -253,16 +246,13 @@ filtered["Total CLP conv. num"] = filtered.apply(
     lambda r: total_en_clp(r, usd_clp, uf_clp), axis=1)
 
 # ── Columna de antigüedad ─────────────────────────────────────────────────────
-# Calcula días desde la fecha de cotización hasta hoy
-# Verde: < 180 días | Amarillo: 180-365 días | Rojo: > 365 días
 hoy = pd.Timestamp.now().normalize()
 
 def calcular_antiguedad(fecha):
     try:
         if pd.isna(fecha):
             return None
-        dias = (hoy - pd.Timestamp(fecha)).days
-        return dias
+        return (hoy - pd.Timestamp(fecha)).days
     except:
         return None
 
@@ -308,26 +298,20 @@ show_cols = [
     "Especificacion", "Zona", "Proyecto", "Proveedor", "Cantidad", "Unidad",
     "Precio Unitario", "Moneda", "P. Unit. CLP num",
     "Precio Total USD", "Precio Total CLP", "Total CLP conv. num",
-    "Fecha Cotización", "Antigüedad",
-    "Observaciones", "Link Archivo"
+    "Fecha Cotización", "Antigüedad", "Observaciones", "Link Archivo"
 ]
 display = filtered[[c for c in show_cols if c in filtered.columns]].copy()
 
-# Formatea números
 display["Cantidad"]            = filtered["Cantidad"].apply(lambda x: fmt_num(x, 0))
 display["Precio Unitario"]     = filtered["Precio Unitario"].apply(lambda x: fmt_num(x, 2))
 display["P. Unit. CLP num"]    = filtered["P. Unit. CLP num"].apply(lambda x: fmt_num(x, 0))
 display["Precio Total USD"]    = filtered["Precio Total USD"].apply(lambda x: fmt_num(x, 0))
 display["Precio Total CLP"]    = filtered["Precio Total CLP"].apply(lambda x: fmt_num(x, 0))
 display["Total CLP conv. num"] = filtered["Total CLP conv. num"].apply(lambda x: fmt_num(x, 0))
-
-# Antigüedad con emoji de color
-display["Antigüedad"] = filtered["Antigüedad"].apply(emoji_antiguedad)
-
-display["Link Archivo"] = filtered["Link Archivo"].apply(
+display["Antigüedad"]          = filtered["Antigüedad"].apply(emoji_antiguedad)
+display["Link Archivo"]        = filtered["Link Archivo"].apply(
     lambda val: val if str(val).startswith("http") else "")
 
-# Renombra columnas
 display = display.rename(columns={
     "Precio Unitario":     "P. Unit. orig.",
     "P. Unit. CLP num":    "P. Unit. CLP",
