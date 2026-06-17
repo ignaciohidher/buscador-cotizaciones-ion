@@ -72,7 +72,7 @@ SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=cs
 
 @st.cache_data(ttl=300)
 def load():
-    df = pd.read_csv(SHEET_URL, header=0)
+    df = pd.read_csv(SHEET_URL, header=0, encoding="utf-8")
     # Elimina columnas sin nombre (columna A vacía del Sheet)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
