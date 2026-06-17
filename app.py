@@ -68,31 +68,19 @@ isotipo_b64 = base64.b64encode(open(LOGO_ISOTIPO, "rb").read()).decode()
 
 # ── Carga de datos desde Google Sheets ───────────────────────────────────────
 SHEET_ID  = "18jORpO5KViHxKG_vmsXXw-df7GMYOCjPLsXGPr4aVXg"
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&id={SHEET_ID}"
+# gviz/tq entrega el CSV con encoding correcto (UTF-8)
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
 
 @st.cache_data(ttl=300)
 def load():
-    import io, requests
-    r = requests.get(SHEET_URL)
-    r.encoding = "utf-8"
-    df = pd.read_csv(io.StringIO(r.text), header=0)
-    # Elimina columnas sin nombre (columna A vacía del Sheet)
+    df = pd.read_csv(SHEET_URL, encoding="utf-8")
+    # Elimina columnas sin nombre
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
-    # Debug temporal: muestra columnas
-    st.write("Columnas detectadas:", df.columns.tolist())
-    st.stop()
-    # Renombra columnas con encoding roto
-    df = df.rename(columns={
-        "ClasificaciÃ³n":     "Clasificación",
-        "Sub-ClasificaciÃ³n": "Sub-Clasificación",
-        "DescripciÃ³n":       "Descripción",
-        "Fecha CotizaciÃ³n":  "Fecha Cotización",
-    })
     # Limpia strings
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].astype(str).str.strip().replace("nan", "")
-    # Limpia números: quita $, espacios y puntos de miles, convierte coma decimal a punto
+    # Limpia números: quita $, espacios, puntos de miles
     for col in ["Precio Unitario", "Precio Total USD", "Precio Total CLP", "Cantidad"]:
         if col in df.columns:
             df[col] = (df[col].astype(str)
@@ -100,7 +88,7 @@ def load():
                        .str.replace('.', '', regex=False)
                        .str.replace(',', '.', regex=False))
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Fecha en formato DD-MM-YYYY
+    # Fecha
     if "Fecha Cotización" in df.columns:
         df["Fecha Cotización"] = pd.to_datetime(
             df["Fecha Cotización"], dayfirst=True, errors="coerce")
