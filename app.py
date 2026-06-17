@@ -175,31 +175,17 @@ with st.sidebar:
 
 # ── Búsqueda inteligente ──────────────────────────────────────────────────────
 def busqueda_inteligente(df, query):
+    def busqueda_inteligente(df, query):
     if not query:
         return df
     query_norm = query.lower().strip()
-    palabras   = query_norm.split()
-
-    def fila_coincide(row):
-        texto = " ".join(row.astype(str).values).lower()
-        if query_norm in texto:
-            return True
-        if all(p in texto for p in palabras):
-            return True
-        for celda in row.astype(str).values:
-            celda_norm = celda.lower()
-            for palabra in palabras:
-                if len(palabra) >= 4:
-                    sim = SequenceMatcher(None, palabra, celda_norm).ratio()
-                    if sim >= 0.75:
-                        return True
-                    for i in range(len(celda_norm) - len(palabra) + 1):
-                        sub = celda_norm[i:i+len(palabra)]
-                        if SequenceMatcher(None, palabra, sub).ratio() >= 0.8:
-                            return True
-        return False
-
-    mask = df.apply(fila_coincide, axis=1)
+    palabras = query_norm.split()
+    mask = df.apply(
+        lambda row: all(
+            p in " ".join(row.astype(str).values).lower()
+            for p in palabras
+        ), axis=1
+    )
     return df[mask]
 
 # ── Aplicar filtros ───────────────────────────────────────────────────────────
