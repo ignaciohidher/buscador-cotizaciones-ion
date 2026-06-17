@@ -177,10 +177,14 @@ with st.sidebar:
 def busqueda_inteligente(df, query):
     if not query:
         return df
-    texto_filas = df.astype(str).agg(" ".join, axis=1).str.lower()
+    # Concatena columnas columna por columna sin apply
+    texto_filas = df.astype(str).fillna("")
+    texto_concat = texto_filas.iloc[:, 0].str.lower()
+    for col in texto_filas.columns[1:]:
+        texto_concat = texto_concat + " " + texto_filas[col].str.lower()
     mask = pd.Series([True] * len(df), index=df.index)
     for palabra in query.lower().strip().split():
-        mask = mask & texto_filas.str.contains(palabra, regex=False)
+        mask = mask & texto_concat.str.contains(palabra, regex=False)
     return df[mask]
 
 # ── Aplicar filtros ───────────────────────────────────────────────────────────
