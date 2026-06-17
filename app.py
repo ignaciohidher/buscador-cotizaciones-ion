@@ -68,11 +68,14 @@ isotipo_b64 = base64.b64encode(open(LOGO_ISOTIPO, "rb").read()).decode()
 
 # ── Carga de datos desde Google Sheets ───────────────────────────────────────
 SHEET_ID  = "18jORpO5KViHxKG_vmsXXw-df7GMYOCjPLsXGPr4aVXg"
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&id={SHEET_ID}"
 
 @st.cache_data(ttl=300)
 def load():
-    df = pd.read_csv(SHEET_URL, header=0, encoding="utf-8")
+    import io, requests
+    r = requests.get(SHEET_URL)
+    r.encoding = "utf-8"
+    df = pd.read_csv(io.StringIO(r.text), header=0)
     # Elimina columnas sin nombre (columna A vacía del Sheet)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
