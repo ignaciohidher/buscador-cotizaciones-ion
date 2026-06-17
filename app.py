@@ -175,7 +175,6 @@ with st.sidebar:
 
 # ── Búsqueda inteligente ──────────────────────────────────────────────────────
 def busqueda_inteligente(df, query):
-    def busqueda_inteligente(df, query):
     if not query:
         return df
     query_norm = query.lower().strip()
