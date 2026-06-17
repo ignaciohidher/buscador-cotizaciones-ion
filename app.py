@@ -12,9 +12,12 @@ import os
 from difflib import SequenceMatcher
 
 # ── Configuración de la página ────────────────────────────────────────────────
+BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
+LOGO_ISOTIPO = os.path.join(BASE_DIR, "ion_logo2.png")
+
 st.set_page_config(
     page_title="Buscador Cotizaciones · ION Chile",
-    page_icon="⚡",
+    page_icon=LOGO_ISOTIPO,
     layout="wide"
 )
 
@@ -59,9 +62,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Logos en base64 ───────────────────────────────────────────────────────────
-BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH    = os.path.join(BASE_DIR, "ion_logo.png")
-LOGO_ISOTIPO = os.path.join(BASE_DIR, "ion_logo2.png")
 
 logo_b64    = base64.b64encode(open(LOGO_PATH, "rb").read()).decode()
 isotipo_b64 = base64.b64encode(open(LOGO_ISOTIPO, "rb").read()).decode()
