@@ -79,6 +79,9 @@ def load():
     # Elimina columnas sin nombre (columna A vacía del Sheet)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
+    # Debug temporal: muestra columnas
+    st.write("Columnas detectadas:", df.columns.tolist())
+    st.stop()
     # Renombra columnas con encoding roto
     df = df.rename(columns={
         "ClasificaciÃ³n":     "Clasificación",
