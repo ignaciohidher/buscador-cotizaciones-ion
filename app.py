@@ -76,6 +76,13 @@ def load():
     # Elimina columnas sin nombre (columna A vacía del Sheet)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
+    # Renombra columnas con encoding roto
+    df = df.rename(columns={
+        "ClasificaciÃ³n":     "Clasificación",
+        "Sub-ClasificaciÃ³n": "Sub-Clasificación",
+        "DescripciÃ³n":       "Descripción",
+        "Fecha CotizaciÃ³n":  "Fecha Cotización",
+    })
     # Limpia strings
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].astype(str).str.strip().replace("nan", "")
