@@ -151,11 +151,12 @@ with st.sidebar:
             import requests
             r = requests.get("https://mindicador.cl/api", timeout=5)
             data = r.json()
-            return data["dolar"]["valor"], data["uf"]["valor"]
+            fecha_dolar = data["dolar"]["fecha"][:10]  # YYYY-MM-DD, fecha real del dato
+            return data["dolar"]["valor"], data["uf"]["valor"], fecha_dolar
         except:
-            return 920.0, 37500.0  # Valores de respaldo si la API falla
+            return 920.0, 37500.0, "N/D"
 
-    usd_default, uf_default = obtener_indicadores()
+    usd_default, uf_default, fecha_indicadores = obtener_indicadores()
 
     usd_clp = st.number_input("USD → CLP", value=float(usd_default), step=1.0, format="%.0f", key=f"usd_{rc}")
     st.caption(f"📡 Oficial: $ {fmt_num(usd_default, 2)}")
@@ -165,7 +166,7 @@ with st.sidebar:
 
     st.markdown(
         f"<p style='color:#626666; font-size:10px; margin-top:-5px'>"
-        f"Actualizado: {pd.Timestamp.now().strftime('%d-%m-%Y %H:%M')} hrs</p>",
+        f"Fecha indicador oficial: {fecha_indicadores}</p>",
         unsafe_allow_html=True
     )
 
@@ -203,9 +204,11 @@ with st.sidebar:
 
     st.markdown("---")
     st.button("🔄 Limpiar filtros", on_click=limpiar_filtros)
+    # Hora de Chile (UTC-4 / UTC-3 en horario de verano). Streamlit Cloud usa UTC por defecto.
+    hora_chile = pd.Timestamp.now(tz="America/Santiago")
     st.markdown(
         f"<p style='color:#626666; font-size:11px; text-align:center; margin-top:8px'>"
-        f"Actualizado: {pd.Timestamp.now().strftime('%d-%m-%Y %H:%M')}</p>",
+        f"Sesión iniciada: {hora_chile.strftime('%d-%m-%Y %H:%M')} hrs (Chile)</p>",
         unsafe_allow_html=True
     )
 
