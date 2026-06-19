@@ -130,8 +130,23 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown("### 💱 Tipo de Cambio")
-    usd_clp = st.number_input("USD → CLP", value=920.0, step=1.0, format="%.0f", key=f"usd_{rc}")
-    uf_clp  = st.number_input("UF → CLP",  value=37500.0, step=10.0, format="%.0f", key=f"uf_{rc}")
+
+    # Obtiene USD y UF del día desde mindicador.cl (API oficial chilena, gratuita)
+    @st.cache_data(ttl=3600)  # Refresca cada 1 hora
+    def obtener_indicadores():
+        try:
+            import requests
+            r = requests.get("https://mindicador.cl/api", timeout=5)
+            data = r.json()
+            return data["dolar"]["valor"], data["uf"]["valor"]
+        except:
+            return 920.0, 37500.0  # Valores de respaldo si la API falla
+
+    usd_default, uf_default = obtener_indicadores()
+
+    usd_clp = st.number_input("USD → CLP", value=float(usd_default), step=1.0, format="%.0f", key=f"usd_{rc}")
+    uf_clp  = st.number_input("UF → CLP",  value=float(uf_default), step=10.0, format="%.0f", key=f"uf_{rc}")
+    st.caption(f"📡 Valores oficiales del día (mindicador.cl)")
 
     st.markdown("### Filtros")
     st.markdown("---")
