@@ -97,6 +97,19 @@ def load():
 
 df = load()
 
+# ── Formateo chileno ──────────────────────────────────────────────────────────
+# Movido arriba para poder usarlo en el sidebar (tipo de cambio)
+def fmt_num(val, decimales=0):
+    try:
+        if pd.isna(val): return ""
+        if decimales == 0:
+            return f"{int(round(val)):,}".replace(",", ".")
+        else:
+            s = f"{val:,.{decimales}f}"
+            return s.replace(",", "X").replace(".", ",").replace("X", ".")
+    except:
+        return ""
+
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="header-container">
@@ -145,8 +158,16 @@ with st.sidebar:
     usd_default, uf_default = obtener_indicadores()
 
     usd_clp = st.number_input("USD → CLP", value=float(usd_default), step=1.0, format="%.0f", key=f"usd_{rc}")
+    st.caption(f"📡 Oficial: $ {fmt_num(usd_default, 2)}")
+
     uf_clp  = st.number_input("UF → CLP",  value=float(uf_default), step=10.0, format="%.0f", key=f"uf_{rc}")
-    st.caption(f"📡 Valores oficiales del día (mindicador.cl)")
+    st.caption(f"📡 Oficial: $ {fmt_num(uf_default, 2)}")
+
+    st.markdown(
+        f"<p style='color:#626666; font-size:10px; margin-top:-5px'>"
+        f"Actualizado: {pd.Timestamp.now().strftime('%d-%m-%Y %H:%M')} hrs</p>",
+        unsafe_allow_html=True
+    )
 
     st.markdown("### Filtros")
     st.markdown("---")
@@ -281,18 +302,6 @@ m2.markdown(f'<div class="metric-box metric-blue"><div class="label">Total USD</
 m3.markdown(f'<div class="metric-box metric-green"><div class="label">Total CLP (conv.)</div><div class="value">$ {total_clp:,.0f}</div></div>', unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
-
-# ── Formateo chileno ──────────────────────────────────────────────────────────
-def fmt_num(val, decimales=0):
-    try:
-        if pd.isna(val): return ""
-        if decimales == 0:
-            return f"{int(round(val)):,}".replace(",", ".")
-        else:
-            s = f"{val:,.{decimales}f}"
-            return s.replace(",", "X").replace(".", ",").replace("X", ".")
-    except:
-        return ""
 
 # ── Tabla de resultados ───────────────────────────────────────────────────────
 show_cols = [
