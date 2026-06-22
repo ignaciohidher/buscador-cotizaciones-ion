@@ -113,7 +113,7 @@ def load():
         for nombre in df["Proveedor"]:
             key = normalizar_proveedor(nombre)
             if key and key not in mapa_prov:
-                mapa_prov[key] = nombre.strip()
+                mapa_prov[key] = str(nombre).strip()
         df["Proveedor"] = df["Proveedor"].apply(
             lambda x: mapa_prov.get(normalizar_proveedor(x), x))
 
