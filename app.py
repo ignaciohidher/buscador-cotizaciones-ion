@@ -9,6 +9,7 @@ import pandas as pd
 import base64
 import plotly.express as px
 import os
+import unicodedata
 from difflib import SequenceMatcher
 
 # ── Configuración de la página ────────────────────────────────────────────────
@@ -67,21 +68,33 @@ LOGO_PATH    = os.path.join(BASE_DIR, "ion_logo.png")
 logo_b64    = base64.b64encode(open(LOGO_PATH, "rb").read()).decode()
 isotipo_b64 = base64.b64encode(open(LOGO_ISOTIPO, "rb").read()).decode()
 
+# ── Normalización de proveedores ──────────────────────────────────────────────
+# Elimina tildes, convierte a minúsculas y elimina espacios extra
+# para que "Aragón", "Aragon" y "aragon" sean el mismo proveedor
+def normalizar_proveedor(nombre):
+    if not nombre or nombre in ("", "nan", "None"):
+        return ""
+    # Elimina tildes (NFD descompone, luego filtra caracteres de combinación)
+    nfkd = unicodedata.normalize("NFD", str(nombre))
+    sin_tildes = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return sin_tildes.strip().lower()
+
+def canonico_proveedor(nombre, mapa):
+    """Devuelve el nombre canónico del proveedor (primera aparición normalizada)."""
+    key = normalizar_proveedor(nombre)
+    return mapa.get(key, nombre)
+
 # ── Carga de datos desde Google Sheets ───────────────────────────────────────
 SHEET_ID  = "18jORpO5KViHxKG_vmsXXw-df7GMYOCjPLsXGPr4aVXg"
-# gviz/tq entrega el CSV con encoding correcto (UTF-8)
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
 
 @st.cache_data(ttl=300)
 def load():
     df = pd.read_csv(SHEET_URL, encoding="utf-8")
-    # Elimina columnas sin nombre
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df = df.dropna(how="all")
-    # Limpia strings
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].astype(str).str.strip().replace("nan", "")
-    # Limpia números: quita $, espacios, puntos de miles
     for col in ["Precio Unitario", "Precio Total USD", "Precio Total CLP", "Cantidad"]:
         if col in df.columns:
             df[col] = (df[col].astype(str)
@@ -89,16 +102,26 @@ def load():
                        .str.replace('.', '', regex=False)
                        .str.replace(',', '.', regex=False))
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Fecha
     if "Fecha Cotización" in df.columns:
         df["Fecha Cotización"] = pd.to_datetime(
             df["Fecha Cotización"], dayfirst=True, errors="coerce")
+
+    # Construye mapa de normalización: clave normalizada → nombre canónico (primera aparición)
+    # Así "Aragón" y "aragon" se unifican bajo el primero que aparezca
+    if "Proveedor" in df.columns:
+        mapa_prov = {}
+        for nombre in df["Proveedor"]:
+            key = normalizar_proveedor(nombre)
+            if key and key not in mapa_prov:
+                mapa_prov[key] = nombre.strip()
+        df["Proveedor"] = df["Proveedor"].apply(
+            lambda x: mapa_prov.get(normalizar_proveedor(x), x))
+
     return df
 
 df = load()
 
 # ── Formateo chileno ──────────────────────────────────────────────────────────
-# Movido arriba para poder usarlo en el sidebar (tipo de cambio)
 def fmt_num(val, decimales=0):
     try:
         if pd.isna(val): return ""
@@ -144,14 +167,13 @@ with st.sidebar:
 
     st.markdown("### 💱 Tipo de Cambio")
 
-    # Obtiene USD y UF del día desde mindicador.cl (API oficial chilena, gratuita)
-    @st.cache_data(ttl=3600)  # Refresca cada 1 hora
+    @st.cache_data(ttl=3600)
     def obtener_indicadores():
         try:
             import requests
             r = requests.get("https://mindicador.cl/api", timeout=5)
             data = r.json()
-            fecha_dolar = data["dolar"]["fecha"][:10]  # YYYY-MM-DD, fecha real del dato
+            fecha_dolar = data["dolar"]["fecha"][:10]
             return data["dolar"]["valor"], data["uf"]["valor"], fecha_dolar
         except:
             return 920.0, 37500.0, "N/D"
@@ -175,7 +197,6 @@ with st.sidebar:
 
     search = st.text_input("🔍 Buscar", placeholder="Especificación, proveedor…", key=f"search_{rc}")
 
-    # Filtros en cascada
     cuenta = st.selectbox("Cuenta Contable", opts("Cuenta Contable"), key=f"cuenta_{rc}")
     df_c = df[df["Cuenta Contable"] == cuenta] if cuenta != "Todas" else df
 
@@ -204,7 +225,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.button("🔄 Limpiar filtros", on_click=limpiar_filtros)
-    # Hora de Chile (UTC-4 / UTC-3 en horario de verano). Streamlit Cloud usa UTC por defecto.
     hora_chile = pd.Timestamp.now(tz="America/Santiago")
     st.markdown(
         f"<p style='color:#626666; font-size:11px; text-align:center; margin-top:8px'>"
@@ -216,7 +236,6 @@ with st.sidebar:
 def busqueda_inteligente(df, query):
     if not query:
         return df
-    # Concatena columnas columna por columna sin apply
     texto_filas = df.astype(str).fillna("")
     texto_concat = texto_filas.iloc[:, 0].str.lower()
     for col in texto_filas.columns[1:]:
@@ -391,27 +410,39 @@ if hay_filtro and n > 0:
         st.plotly_chart(fig, use_container_width=True)
 
     elif tipo_grafico == "Comparador de Proveedores":
-        comp = filtered[["Descripción", "Proveedor", "P. Unit. CLP num"]].dropna()
+        # Los proveedores ya vienen normalizados desde load()
+        # (Aragón, Aragon, aragon → mismo nombre canónico)
+        comp = filtered[["Descripción", "Proveedor", "P. Unit. CLP num", "Fecha Cotización"]].dropna(
+            subset=["Descripción", "Proveedor", "P. Unit. CLP num"])
         comp = comp[comp["P. Unit. CLP num"] > 0].copy()
 
         if comp.empty:
             st.info("No hay datos suficientes para comparar proveedores.")
         else:
-            comp = comp.groupby(["Descripción", "Proveedor"], as_index=False)["P. Unit. CLP num"].mean()
-            comp = comp.sort_values("P. Unit. CLP num", ascending=True)
+            # Promedio por descripción + proveedor, guardando la fecha más reciente
+            comp_agg = comp.groupby(["Descripción", "Proveedor"], as_index=False).agg(
+                precio_prom=("P. Unit. CLP num", "mean"),
+                ultima_fecha=("Fecha Cotización", "max")
+            )
+            comp_agg = comp_agg.sort_values("precio_prom", ascending=True)
 
-            proveedores = comp["Proveedor"].unique()
+            # Formatea fecha para mostrar en hover
+            comp_agg["Última cotización"] = comp_agg["ultima_fecha"].dt.strftime("%d-%m-%Y")
+            comp_agg["Precio promedio"]   = comp_agg["precio_prom"].apply(lambda x: fmt_num(x, 0))
+
+            proveedores = comp_agg["Proveedor"].unique()
             colores = ["#0391d5","#e21b1b","#8ec11d","#f5a623","#9b59b6","#1abc9c","#e67e22","#34495e"]
             color_map = {p: colores[i % len(colores)] for i, p in enumerate(proveedores)}
 
             fig = px.bar(
-                comp,
-                x="P. Unit. CLP num", y="Descripción",
+                comp_agg,
+                x="precio_prom", y="Descripción",
                 color="Proveedor",
                 orientation="h",
                 color_discrete_map=color_map,
-                text=comp["P. Unit. CLP num"].apply(lambda x: fmt_num(x, 0)),
-                barmode="group"
+                text=comp_agg["precio_prom"].apply(lambda x: fmt_num(x, 0)),
+                barmode="group",
+                hover_data={"precio_prom": False, "Precio promedio": True, "Última cotización": True}
             )
             fig.update_traces(textposition="outside")
             fig.update_layout(
@@ -420,42 +451,67 @@ if hay_filtro and n > 0:
                 xaxis_title="Precio Unitario Promedio (CLP)", yaxis_title="",
                 legend_title="Proveedor",
                 margin=dict(l=20, r=120, t=20, b=20),
-                height=max(350, len(comp) * 35)
+                height=max(350, len(comp_agg) * 35)
             )
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("💡 Tip: filtra por Descripción o Sub-Clasificación para comparar ítems similares.")
+            st.caption("💡 Tip: filtra por Descripción o Sub-Clasificación para comparar ítems similares. Al pasar el cursor sobre cada barra ves la fecha de la última cotización.")
 
     elif tipo_grafico == "Evolución de Precios en el Tiempo":
-        evol = filtered[["Fecha Cotización", "Especificacion", "P. Unit. CLP num"]].dropna()
-        evol["Fecha Cotización"] = pd.to_datetime(evol["Fecha Cotización"], errors="coerce")
+        # Muestra cómo varía el precio de un producto por proveedor a lo largo del tiempo
+        evol = filtered[["Fecha Cotización", "Especificacion", "Proveedor", "P. Unit. CLP num"]].dropna(
+            subset=["Fecha Cotización", "P. Unit. CLP num"])
         evol = evol[evol["P. Unit. CLP num"] > 0].copy()
-        evol = evol.dropna(subset=["Fecha Cotización"])
         evol = evol.sort_values("Fecha Cotización")
-        evol["Especificacion"] = evol["Especificacion"].str[:35]
+        evol["Especificacion"] = evol["Especificacion"].str[:40]
+        evol["Etiqueta"] = evol["Proveedor"] + " — " + evol["Especificacion"]
 
         if evol.empty:
             st.info("No hay fechas disponibles para los registros filtrados.")
-        elif len(evol["Especificacion"].unique()) > 10:
-            st.info("💡 Demasiados productos. Filtra por Descripción para ver la evolución.")
+        elif len(evol["Etiqueta"].unique()) > 15:
+            st.info("💡 Demasiadas combinaciones. Filtra por Descripción o Proveedor para ver la evolución.")
         else:
-            fig = px.bar(
+            # Líneas por proveedor, puntos en cada fecha de cotización
+            fig = px.line(
                 evol,
-                x="Fecha Cotización", y="P. Unit. CLP num",
-                color="Especificacion",
-                barmode="group",
-                text=evol["P. Unit. CLP num"].apply(lambda x: fmt_num(x, 0)),
-                color_discrete_sequence=["#0391d5","#e21b1b","#8ec11d","#f5a623","#9b59b6","#1abc9c"]
+                x="Fecha Cotización",
+                y="P. Unit. CLP num",
+                color="Proveedor",
+                symbol="Especificacion",
+                markers=True,
+                color_discrete_sequence=["#0391d5","#e21b1b","#8ec11d","#f5a623","#9b59b6","#1abc9c","#e67e22","#34495e"],
+                hover_data={
+                    "P. Unit. CLP num": False,
+                    "Proveedor": True,
+                    "Especificacion": True,
+                    "Fecha Cotización": True,
+                },
+                custom_data=["Proveedor", "Especificacion", "P. Unit. CLP num"]
             )
-            fig.update_traces(textposition="outside", textangle=0)
+
+            # Agrega etiqueta de precio en cada punto
+            fig.update_traces(
+                hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Fecha: %{x|%d-%m-%Y}<br>Precio: $ %{customdata[2]:,.0f}<extra></extra>",
+                mode="lines+markers+text",
+                textposition="top center",
+            )
+
+            # Muestra valores en los puntos
+            for trace in fig.data:
+                trace.text = [fmt_num(v, 0) for v in trace.y]
+                trace.textfont = dict(size=9)
+
             fig.update_layout(
                 plot_bgcolor="white", paper_bgcolor="white",
                 font_family="Inter", font_color="#181a1a",
-                xaxis_title="Fecha", yaxis_title="Precio Unitario (CLP)",
-                legend_title="Especificación",
-                margin=dict(l=20, r=20, t=30, b=20), height=450
+                xaxis_title="Fecha de cotización",
+                yaxis_title="Precio Unitario (CLP)",
+                legend_title="Proveedor",
+                margin=dict(l=20, r=20, t=30, b=20),
+                height=480,
+                xaxis=dict(tickformat="%b %Y"),
             )
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("💡 Tip: filtra por Descripción para ver la evolución de precios en el tiempo.")
+            st.caption("💡 Tip: cada línea es un proveedor. Filtra por Descripción para ver cómo varía el precio de un mismo producto en el tiempo entre distintos proveedores.")
 
 # ── Exportar a CSV ────────────────────────────────────────────────────────────
 _, _, col_btn = st.columns([4, 4, 2])
